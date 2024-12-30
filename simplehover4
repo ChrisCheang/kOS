@@ -1,0 +1,124 @@
+// simplehover4 - rudimentary landing with a moving altitude setpoint.
+
+
+// https://ksp-kos.github.io/KOS/tutorials/pidloops.html
+// https://ksp-kos.github.io/KOS/structures/misc/pidloop.html
+// https://electronics.stackexchange.com/questions/624607/how-to-add-a-constant-to-a-control-system-block-diagram
+// https://ksp-kos.github.io/KOS/commands/flight/cooked.html#don-t-wait-or-run-slow-script-code-during-cooked-control-calculation
+
+// https://www.reddit.com/r/Kos/comments/bwy79n/clarifications_on_shipvelocitysurface/
+// https://ksp-kos.github.io/KOS/math/ref_frame.html#raw-orientation
+
+// 
+
+CLEARSCREEN.
+
+
+
+
+SET thrott TO 0.7.
+SET startTime TO TIME:SECONDS.
+LOCK now TO TIME:SECONDS-startTime.
+LOCK targetalt to 250-now. // the setpoint 
+// (from pad to VAb, use 250-now with 70% throttle for KLS hopper)
+// (from pad to old airfield, use 450-0.5*now with 70% throttle for KLS hopper)
+
+
+// Orientation
+// Idea: two PID loops, one for east-west pos and north-south pos each. PIDoutputs for these will be fed into a function to create a vector for the vehicle to lock steering to, defined as the altitudeposition of the current vehicle position + lat and lng PIDoutput offsets.
+
+
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// Launchpad: -0.0973319733830108, -74.5574047734005
+//  Old airfield: -1.52345615887243, -71.911147229259
+SET padlat TO -0.097283135961222.    
+SET padlng TO -74.6190385749848.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+LOCK upVec TO SHIP:UP:VECTOR.
+LOCK eastVec TO VCRS(upVec,northVec).
+
+LOCK northSpeed TO VDOT(northVec,SHIP:VELOCITY:SURFACE).
+LOCK upSpeed TO VDOT(upVec,SHIP:VELOCITY:SURFACE).
+LOCK eastSpeed TO VDOT(eastVec,SHIP:VELOCITY:SURFACE).
+
+
+SET EASTPID TO PIDLOOP(1,0.2,4,-0.003,0.003).    // 1, 0.2, 4
+SET NORTHPID TO PIDLOOP(1,0.2,4,-0.003,0.003).
+SET EASTPID:SETPOINT TO padlng.
+SET NORTHPID:SETPOINT TO padlat.
+
+SET eastPIDUpdate TO 0.
+SET northPIDUpdate TO 0.
+SET targetHeading TO 0.
+
+
+// LOCK STEERING TO UP.
+
+
+//LOCK STEERING TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+50).
+
+LOCK targetVec TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+50).
+
+LOCK STEERING TO LOOKDIRUP(targetVec,northVec).
+// https://ksp-kos.github.io/KOS/math/direction.html
+
+
+
+// Drawing an debug arrow in 3D space at the spot where the GeoCoordinate
+// "spot" is:
+// It starts at a position 100m above the ground altitude and is aimed down
+// at the spot on the ground:
+//SET VD TO VECDRAWARGS(
+              //{ return spot:ALTITUDEPOSITION(targetalt+100). },
+              //{ return spot:POSITION - spot:ALTITUDEPOSITION(targetalt+100). },
+              //red, "THIS IS THE SPOT", 1, true).
+//SET VDt TO VECDRAWARGS(
+              //{ return myspot:ALTITUDEPOSITION(ALTITUDE). },
+              //{ return 0.1*targetVec. },
+              //blue, "targetVec", 1, true).
+
+
+// Altitude controller - Gains
+
+// 0.5, 0.3, 0.5 works well with 1.38 TWR
+
+SET Kp TO 0.5.
+SET Ki TO 0.3.
+SET Kd TO 0.5.
+SET PID TO PIDLOOP(Kp, Ki, Kd, 0.3, 1).
+
+
+LOCK THROTTLE TO thrott.
+
+until false {
+	SET PID:SETPOINT TO targetalt.
+	set thrott to PID:UPDATE(TIME:SECONDS, ALTITUDE).
+	set eastPIDUpdate to EASTPID:UPDATE(TIME:SECONDS, lng).
+	set northPIDUpdate to NORTHPID:UPDATE(TIME:SECONDS, lat).
+	set targetHeading to MOD(arctan2(eastPIDUpdate,northPIDUpdate) + 360, 360). 	//https://stackoverflow.com/questions/1311049/how-to-map-atan2-to-degrees-0-360
+	// note: switching north and east around in arctan2 is a quick fix to address the (y,x) input of atan2
+
+	CLEARSCREEN.
+	PRINT "throttle = " + round(thrott,3) + ", alt = " + round(ALTITUDE,2).
+	PRINT "Bearing = " + round(MOD(360-ship:BEARING, 360),2) + " deg".
+	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
+	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
+	PRINT "Up Velocity = " + round(upSpeed,2) + " m/s".
+	PRINT  "Latitude dif  = " + (lat - padlat).
+	PRINT  "Longitude dif = " + (lng - padlng).
+	PRINT "eastPIDUpdate = " + eastPIDUpdate.
+	PRINT "northPIDUpdate = " + northPIDUpdate.
+	PRINT "Target heading = " + targetHeading.
+	PRINT now.
+	PRINT targetalt.
+}
+
+// Notes: successful rudimentary landing on VAB roof, significant overshoot on lateral and vertical trajectories, as the PID is not tuned for large offsets (nonlinear system). Reduced gimbal authority of FatHopper means it is less adept at high velocity lateral movement --> increasing CoG and pivot point separation is a tradeoff between better steady-state stability and control authority.
+// Encountered lost connection error when testing landing at old airfield; may be issue related to commnet connectivity manager https://www.reddit.com/r/Kos/comments/cvd9jf/no_control_with_no_connection_with_commnet/?rdt=60517. Problem persisted with commnet connectivity in another gamesave and initiated antennae. Solution: kOS has remoteTech dependency, which means antennae must be pointed at KSC with line of sight or else the max range is 3 km. Tested default on antennae with AV Spearhead, connection lost when KSC dipped below horizon. May need to setup relay network in world testing https://www.reddit.com/r/KerbalSpaceProgram/comments/1rml0r/tutorial_complete_novices_guide_to_remotetech_2/.

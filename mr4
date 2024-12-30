@@ -1,0 +1,149 @@
+// mr4 (mecharod script 4) - mr3 deorbit burn testing from 72 km circular orbit + mr2 hoverslam and hover.
+
+set orbiting to 1.
+set deorbitBurn to 2.
+set reentry to 3.
+set falling to 4.
+set hoverslam to 5.
+set hover to 6.
+
+set mode to orbiting.
+
+set initialdv to SHIP:DELTAV:CURRENT.
+LOCK dv to SHIP:DELTAV:CURRENT.
+lock twr to ship:maxthrust / (constant:g0 * ship:mass). 
+
+SET startTime TO TIME:SECONDS.
+LOCK now TO TIME:SECONDS-startTime.
+
+SET thrott TO 1.
+set targetalt to 77. // the setpoint (bit of land off launchpad is 77, vab 186)
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// just off the Launchpad: -0.0993657504037605, -74.5574047734005  
+SET padlat TO -0.07.    
+SET padlng TO -74.6190385749848.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+LOCK upVec TO SHIP:UP:VECTOR.
+LOCK eastVec TO VCRS(upVec,northVec).
+
+LOCK northSpeed TO VDOT(northVec,SHIP:VELOCITY:SURFACE).
+LOCK upSpeed TO VDOT(upVec,SHIP:VELOCITY:SURFACE).
+LOCK eastSpeed TO VDOT(eastVec,SHIP:VELOCITY:SURFACE).
+
+SET EASTPID TO PIDLOOP(1,0.05,6,-0.001,0.001). 
+SET NORTHPID TO PIDLOOP(1,0.05,6,-0.001,0.001).
+SET EASTPID:SETPOINT TO padlng.
+SET NORTHPID:SETPOINT TO padlat.
+
+SET eastPIDUpdate TO 0.
+SET northPIDUpdate TO 0.
+SET targetHeading TO 0.
+
+set done to false.
+
+until done {
+	clearscreen.
+	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
+	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
+	print "longitude = " + round(lng,3).
+	print vdot(ship:sensors:acc,LATLNG(lat,lng):ALTITUDEPOSITION(ALTITUDE-100):normalized).
+	print ship:sensors:acc:mag.
+	print "mode = " + mode.
+	if mode = orbiting {
+		lock steering to -SHIP:VELOCITY:ORBIT.
+		if lng > 157 {
+			set mode to deorbitBurn.
+		}
+	} else if mode = deorbitBurn {
+		print "burn dv = " + round(initialdv - dv,3).
+		lock throttle to 1.
+		lock steering to -SHIP:VELOCITY:ORBIT.
+		if (initialdv - dv) > 100 {
+			set mode to reentry.
+		}
+	} else if mode = reentry {
+		lock throttle to 0.
+		lock steering to lookdirup(LATLNG(lat,lng - 0.2):ALTITUDEPOSITION(ALTITUDE - 1000),northVec).
+		if ship:groundspeed < 2000 and altitude < 50000 {
+			rcs off.	
+			lock brakeThreshold to 8.
+			set vf to 200. // target mode 4 entry speed
+			set ag to 10. // roughly 1g glide horizontal deceleration, assumed constant
+			// 1 deg lng diff on Earth is 11.2 km (https://www.omnicalculator.com/other/latitude-longitude-distance), scaled down by 600/6382 gives 10.46 km per lng on Kerbin roughly
+
+			if lng > (padlng - brakeThreshold) {
+				brakes on. 
+			}
+			if altitude < 10000 or ABS(lng) < (ABS(padlng) + 0.25) {
+				set mode to falling.
+			}
+		} else {
+			brakes off.
+			rcs on.
+		}
+	} else if mode = falling {
+		rcs on.
+		brakes on.
+		SET falleastpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01). 
+		SET fallnorthpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01).
+		SET falleastpid:SETPOINT TO padlng.
+		SET fallnorthpid:SETPOINT TO padlat.
+
+		lock eastPIDUpdate to falleastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to fallnorthpid:UPDATE(TIME:SECONDS, lat).
+		LOCK targetVec TO LATLNG(lat - northPIDUpdate,lng - eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+80).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+
+		lock threshold to ABS((ship:verticalspeed^2)/(2*constant:g0*(twr-1))).
+		if (altitude-targetalt)<threshold {
+			set mode to hoverslam.
+		}
+	} else if mode = hoverslam {
+		set p to -2.
+		lock eastPIDUpdate to eastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to northpid:UPDATE(TIME:SECONDS, lat).
+
+		LOCK targetVec TO LATLNG(lat + p*northPIDUpdate,lng + p*eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+		lock throttle to (1/twr)*(ship:verticalspeed^2/(2*constant:g0*(altitude-(targetalt+1))) + 1).
+		if ship:verticalspeed > -150 { 
+			lock p to 1.
+		}
+		if ship:verticalspeed > 0 { 
+			set mode to hover.
+		}
+	} else if mode = hover {
+		SET PID TO PIDLOOP(0.2, 0.2, 0.7, 0, 1).
+		set PID:SETPOINT TO targetalt.
+
+		LOCK targetVec TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).
+		
+		lock thrott to PID:UPDATE(TIME:SECONDS, ALTITUDE).
+		LOCK THROTTLE TO thrott.
+		lock eastPIDUpdate to EASTPID:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to NORTHPID:UPDATE(TIME:SECONDS, lat).
+	}
+}
+
+// Notes:  (around 600 m/s dv in orbit)
+
+// Test 1(4)
+// with 10 lng airbrake offset, landed 2 lng off --> offset adjusted to 5 (vehicle slowing down considerably during glide even without airbrakes
+
+// Test 2.X (5) (multiple tests from setpoint)
+// significant lat offset --> consider adding some sort of lat fixing loop during glide (falling PID was able to cancel lat offset on the last try, of course not very reliably given it succeeded in one out of three tries. so consider improving falling or hoverslam PID. Also keep in mind that the starting orbit is perfect (cheated insertion for testing), so lat offset in actual use is likely to be higher.)
+// adaptive airbrake triggering condition likely needed, something similar to adaptive hoverslam? airbrake deploy angle? toggle on off? https://github.com/Ren0k/Project-Atmospheric-Drag
+// falling PID loop should only be engaged closer to the target (now set to 0.25 lng)
+// last segmented (quicksave reload from 1750 m/s) attempt with current values above landed vehicle on VAB with manual program termination (12m/s dv left) :)
+
+// Test 3 (6)
+// ship deceleration during glide is 1g - assume constant
+// ship deceleration datapoints during braking (m/s, g): (490, 1.43), (450, 1.408)

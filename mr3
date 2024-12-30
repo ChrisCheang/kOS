@@ -1,0 +1,73 @@
+// mr3 (mecharod script 3) - deorbit burn testing from 72 km circular orbit.
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// just off the Launchpad: -0.0993657504037605, -74.5574047734005   -43.5
+SET padlat TO -0.097283135961222.    
+SET padlng TO -74.6190385749848.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+set initialdv to SHIP:DELTAV:CURRENT.
+LOCK dv to SHIP:DELTAV:CURRENT.
+
+set orbiting to 1.
+set deorbitBurn to 2.
+set reentry to 3.
+
+set mode to orbiting.
+
+set done to false.
+
+until done {
+	clearscreen.
+	print "longitude = " + round(lng,3).
+	print "mode = " + mode.
+	if mode = orbiting {
+		lock steering to -SHIP:VELOCITY:ORBIT.
+		if lng > 157 {
+			set mode to deorbitBurn.
+		}
+	} else if mode = deorbitBurn {
+		print "burn dv = " + round(initialdv - dv,3).
+		lock throttle to 1.
+		lock steering to -SHIP:VELOCITY:ORBIT.
+		if (initialdv - dv) > 100 {
+			set mode to reentry.
+		}
+	} else if mode = reentry {
+		lock throttle to 0.
+		lock steering to lookdirup(LATLNG(lat,lng - 0.2):ALTITUDEPOSITION(ALTITUDE - 1000),northVec).
+		if ship:groundspeed < 2000 {	
+			if lng > (padlng - 6) {brakes on. }
+			rcs off.
+		} else {
+			brakes off.
+			rcs on.
+		}
+	}
+}
+
+
+// Notes:
+
+// Test 1 (oldest design, small deltas at the top, with landing legs) 
+// initial fuel/ox reserves (roughly): 2050,2500
+// current antennae breaks at 2135 m/s, 33km high
+// with -170 deorbit burn, vehicle glide stalls at around 2 lng out
+// try adding ground relay stations on the mountain, lower alt. LEO relay network, and remove upper small delta wings for more pitch authority (airbrakes can be deployed closer to landing, as the reentry incident angle seems to solve heating issues). Vehicle also glides pretty well, can be used as a runmode to adjust position further e.g. glide until 2 lng out from KSC, then deploy airbrakes
+
+// Test 2 (small deltas and landing legs removed)
+// biggest steady-state situation seems to be hypersonic glide (~1800-1600 m/s) at 25-35 km, can design around opening airbrakes at this bit to control position
+// deorbit burn lng updated to 152
+
+// Test 3 
+// with groundspeed 1700 condition, airbrakes open at -91.9 lng, 24.5 km high, -70 m/s vertical speed --> reaches 10k alt, 216m/s hor, -150 m/s ver, at -80.68 lng
+
+// Test 4
+// with 10 lng airbrake offset, landed 2 lng off --> offset adjusted to 8 (vehicle slowing down considerably during glide)

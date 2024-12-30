@@ -1,0 +1,132 @@
+// mr1 (mecharod script 2) - rudimentary hoverslam + hover (modified mr1 code)
+
+// https://ksp-kos.github.io/KOS/tutorials/pidloops.html
+// https://ksp-kos.github.io/KOS/structures/misc/pidloop.html
+// https://electronics.stackexchange.com/questions/624607/how-to-add-a-constant-to-a-control-system-block-diagram
+// https://ksp-kos.github.io/KOS/commands/flight/cooked.html#don-t-wait-or-run-slow-script-code-during-cooked-control-calculation
+
+// https://www.reddit.com/r/Kos/comments/bwy79n/clarifications_on_shipvelocitysurface/
+// https://ksp-kos.github.io/KOS/math/ref_frame.html#raw-orientation
+
+
+set falling to 1.
+set hoverslam to 2.
+set hover to 3.
+set done to false.
+
+//set twr TO ship:maxthrust / (constant:g0 * ship:mass).
+
+set mode to falling.
+lock twr to ship:maxthrust / (constant:g0 * ship:mass). 
+// see if there's an automatic option for this?
+
+
+SET startTime TO TIME:SECONDS.
+LOCK now TO TIME:SECONDS-startTime.
+
+SET thrott TO 1.
+set targetalt to 77. // the setpoint (bit of land off launchpad is 77, vab 186)
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// just off the Launchpad: -0.0993657504037605, -74.5574047734005  
+SET padlat TO -0.07.    
+SET padlng TO -74.6190385749848.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+LOCK upVec TO SHIP:UP:VECTOR.
+LOCK eastVec TO VCRS(upVec,northVec).
+
+LOCK northSpeed TO VDOT(northVec,SHIP:VELOCITY:SURFACE).
+LOCK upSpeed TO VDOT(upVec,SHIP:VELOCITY:SURFACE).
+LOCK eastSpeed TO VDOT(eastVec,SHIP:VELOCITY:SURFACE).
+
+// these should only be set once. check how to gain schedule, if not possible or finicky make two new loops.
+
+
+SET EASTPID TO PIDLOOP(1,0.05,6,-0.001,0.001). 
+SET NORTHPID TO PIDLOOP(1,0.05,6,-0.001,0.001).
+SET EASTPID:SETPOINT TO padlng.
+SET NORTHPID:SETPOINT TO padlat.
+
+SET eastPIDUpdate TO 0.
+SET northPIDUpdate TO 0.
+SET targetHeading TO 0.
+
+until done {
+	if mode = falling {
+		SET falleastpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01). 
+		SET fallnorthpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01).
+		SET falleastpid:SETPOINT TO padlng.
+		SET fallnorthpid:SETPOINT TO padlat.
+
+		lock eastPIDUpdate to falleastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to fallnorthpid:UPDATE(TIME:SECONDS, lat).
+		LOCK targetVec TO LATLNG(lat - northPIDUpdate,lng - eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+80).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+
+		lock threshold to ABS((ship:verticalspeed^2)/(2*constant:g0*(twr-1))).
+		if (altitude-targetalt)<threshold {
+			set mode to hoverslam.
+		}
+	} else if mode = hoverslam {
+		set p to -2.
+		lock eastPIDUpdate to eastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to northpid:UPDATE(TIME:SECONDS, lat).
+
+		LOCK targetVec TO LATLNG(lat + p*northPIDUpdate,lng + p*eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+		lock throttle to (1/twr)*(ship:verticalspeed^2/(2*constant:g0*(altitude-(targetalt+1))) + 1).
+		if ship:verticalspeed > -100 { 
+			lock p to 1.
+		}
+		if ship:verticalspeed > 0 { 
+			set mode to hover.
+		}
+	} else if mode = hover {
+		SET PID TO PIDLOOP(0.2, 0.2, 0.7, 0, 1).
+		set PID:SETPOINT TO targetalt.
+
+		LOCK targetVec TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).
+		
+		lock thrott to PID:UPDATE(TIME:SECONDS, ALTITUDE).
+		LOCK THROTTLE TO thrott.
+		lock eastPIDUpdate to EASTPID:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to NORTHPID:UPDATE(TIME:SECONDS, lat).
+	}
+	
+	SET VD TO VECDRAWARGS(
+              	{ return spot:ALTITUDEPOSITION(ALTITUDE+100). },
+              	{ return spot:POSITION - spot:ALTITUDEPOSITION(ALTITUDE+100). },
+              	red, "LAND HERE", 1, true).
+	SET VDt TO VECDRAWARGS(
+              	{ return myspot:ALTITUDEPOSITION(ALTITUDE). },
+              	{ return 0.5*targetVec. },
+              	blue, "targetVec", 1, true).
+
+	CLEARSCREEN.
+	PRINT "throttle = " + round(thrott,3) + ", alt = " + round(ALTITUDE,2).
+	PRINT "Bearing = " + round(MOD(360-ship:BEARING, 360),2) + " deg".
+	print "accel = " + ship:sensors:acc:mag.//vdot(ship:sensors:acc,LATLNG(lat,lng):ALTITUDEPOSITION(ALTITUDE-100):normalized).
+	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
+	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
+	PRINT "Up Velocity = " + round(upSpeed,2) + " m/s".
+	PRINT  "Latitude dif  = " + (lat - padlat).
+	PRINT  "Longitude dif = " + (lng - padlng).
+	PRINT "eastPIDUpdate = " + eastPIDUpdate.
+	PRINT "northPIDUpdate = " + northPIDUpdate.
+	PRINT "time = " + now.
+	PRINT threshold.
+	PRINT  "Vertical speed = " + ship:verticalspeed.
+	PRINT "mode = " + mode.
+}
+
+
+// Notes: initial tests ok; hoverslam detection, minor gliding course corrections work, but interface between hoverslam and hover is not refined (some sort of adaptive hoverslam to adjust throttle based on distance could maybe work?), and gain scheduling/additional pid loops are needed for better crossrange capability during falling. 
+// with adaptive hoverslam,the landing maneuver takes 510 m/s dv tested from set position, about 300 m/s from orbit
+

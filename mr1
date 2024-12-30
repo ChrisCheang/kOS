@@ -1,0 +1,115 @@
+// mr1 (mecharod script 1) - hovering code for mecharod
+
+
+// https://ksp-kos.github.io/KOS/tutorials/pidloops.html
+// https://ksp-kos.github.io/KOS/structures/misc/pidloop.html
+// https://electronics.stackexchange.com/questions/624607/how-to-add-a-constant-to-a-control-system-block-diagram
+// https://ksp-kos.github.io/KOS/commands/flight/cooked.html#don-t-wait-or-run-slow-script-code-during-cooked-control-calculation
+
+// https://www.reddit.com/r/Kos/comments/bwy79n/clarifications_on_shipvelocitysurface/
+// https://ksp-kos.github.io/KOS/math/ref_frame.html#raw-orientation
+
+// 
+
+CLEARSCREEN.
+
+
+
+
+SET thrott TO 0.7.
+SET startTime TO TIME:SECONDS.
+LOCK now TO TIME:SECONDS-startTime.
+LOCK targetalt to 150-now. // the setpoint
+
+
+// Orientation
+// Idea: two PID loops, one for east-west pos and north-south pos each. PIDoutputs for these will be fed into a function to create a vector for the vehicle to lock steering to, defined as the altitudeposition of the current vehicle position + lat and lng PIDoutput offsets.
+
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// just off the Launchpad: -0.0993657504037605, -74.5574047734005
+SET padlat TO -0.0993657504037605.    
+SET padlng TO -74.5574047734005.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+LOCK upVec TO SHIP:UP:VECTOR.
+LOCK eastVec TO VCRS(upVec,northVec).
+
+LOCK northSpeed TO VDOT(northVec,SHIP:VELOCITY:SURFACE).
+LOCK upSpeed TO VDOT(upVec,SHIP:VELOCITY:SURFACE).
+LOCK eastSpeed TO VDOT(eastVec,SHIP:VELOCITY:SURFACE).
+
+
+SET EASTPID TO PIDLOOP(0.5,0.05,6,-0.001,0.001).    // 1, 0.2, 4
+SET NORTHPID TO PIDLOOP(0.5,0.05,6,-0.001,0.001).
+SET EASTPID:SETPOINT TO padlng.
+SET NORTHPID:SETPOINT TO padlat.
+
+SET eastPIDUpdate TO 0.
+SET northPIDUpdate TO 0.
+SET targetHeading TO 0.
+
+
+// LOCK STEERING TO UP.
+
+
+//LOCK STEERING TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+
+LOCK targetVec TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+
+LOCK STEERING TO LOOKDIRUP(targetVec,northVec).
+// https://ksp-kos.github.io/KOS/math/direction.html
+
+
+
+// Drawing an debug arrow in 3D space at the spot where the GeoCoordinate
+// "spot" is:
+
+SET VD TO VECDRAWARGS(
+              { return spot:ALTITUDEPOSITION(targetalt+100). },
+              { return spot:POSITION - spot:ALTITUDEPOSITION(targetalt+100). },
+              red, "LAND HERE", 1, true).
+SET VDt TO VECDRAWARGS(
+              { return myspot:ALTITUDEPOSITION(ALTITUDE). },
+              { return 0.5*targetVec. },
+              blue, "targetVec", 1, true).
+
+
+
+// Altitude controller - Gains
+
+// Tiny TWR at final hover (1.1 ish)
+
+SET PID TO PIDLOOP(0.2, 0.2, 0.7, 0, 1).
+
+LOCK THROTTLE TO thrott.
+
+until false {
+	SET PID:SETPOINT TO targetalt.
+	set thrott to PID:UPDATE(TIME:SECONDS, ALTITUDE).
+	set eastPIDUpdate to EASTPID:UPDATE(TIME:SECONDS, lng).
+	set northPIDUpdate to NORTHPID:UPDATE(TIME:SECONDS, lat).
+	set targetHeading to MOD(arctan2(eastPIDUpdate,northPIDUpdate) + 360, 360). 	//https://stackoverflow.com/questions/1311049/how-to-map-atan2-to-degrees-0-360
+	// note: switching north and east around in arctan2 is a quick fix to address the (y,x) input of atan2
+
+	CLEARSCREEN.
+	PRINT "throttle = " + round(thrott,3) + ", alt = " + round(ALTITUDE,2).
+	PRINT "Bearing = " + round(MOD(360-ship:BEARING, 360),2) + " deg".
+	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
+	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
+	PRINT "Up Velocity = " + round(upSpeed,2) + " m/s".
+	PRINT  "Latitude dif  = " + (lat - padlat).
+	PRINT  "Longitude dif = " + (lng - padlng).
+	PRINT "eastPIDUpdate = " + eastPIDUpdate.
+	PRINT "northPIDUpdate = " + northPIDUpdate.
+	PRINT "Target heading = " + targetHeading.
+	PRINT now.
+	PRINT targetalt.
+}
+
+// Notes: successful hover! however minor oscillations (+- 0.2 m/s, 0.2/0.3 m lateral) present during steady state; disappears if reaction wheel is turned on, likely a consequence of coupling between orientation and position control. Reducing kp or moving the centre of mass and gimbal pivot point (with KLS FatHopper) reduces magnitude of these minor oscillations.
