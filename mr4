@@ -17,14 +17,15 @@ SET startTime TO TIME:SECONDS.
 LOCK now TO TIME:SECONDS-startTime.
 
 SET thrott TO 1.
-set targetalt to 91. // the setpoint (bit of land off launchpad is 77, vab 186, admin 91)
+set targetalt to 83. // the setpoint (bit of land off launchpad is 77, vab 186, admin 91, launchpad 83)
 
 // Vab Roof: -0.097283135961222, -74.6190385749848
 // just off the Launchpad: -0.0993657504037605, -74.5574047734005  
 // Administration: -0.0925, -74.66285
-SET padlat TO -0.0925.    
-SET padlng TO -74.66285.
-SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+// Launchpad: -0.0972454488125307, -74.5575063304874
+SET padlat TO -0.0972454488125307.    
+SET padlng TO -74.5575063304874.
+SET spot TO LATLNG(padlat, padlng). 
 
 LOCK lat TO SHIP:GEOPOSITION:LAT.
 LOCK lng TO SHIP:GEOPOSITION:LNG.
@@ -74,11 +75,11 @@ until done {
 		set vf to 200. // target mode 4 entry speed
 		set ag to -14. // roughly 1g glide horizontal deceleration, assumed constant
 		set lngkm to 10.46. // 1 deg lng diff on Earth is 11.2 km (https://www.omnicalculator.com/other/latitude-longitude-distance), scaled down by 600/6382 gives 10.46 km per lng on Kerbin roughly
-		lock brakeThreshold to 0.35 + (vf^2-ship:groundspeed^2)/(2 * ag * 1000 * lngkm).
+		lock brakeThreshold to 0.6 + (vf^2-ship:groundspeed^2)/(2 * ag * 1000 * lngkm).
 
 		if ship:groundspeed < 2000 and altitude < 50000 {
 			rcs off.
-			if altitude < 10000 or ABS(lng) < (ABS(padlng) + 0.35) {
+			if altitude < 10000 or ABS(lng) < (ABS(padlng) + 0.6) {
 				set mode to falling.
 			}
 			if lng > (padlng - (brakeThreshold)) {
@@ -162,3 +163,10 @@ until done {
 // Test 6 (9)
 // Successful landing on administration helipad :) 35 m/s dv left with 600 after deorbit burn (700 m/s in orbit)
 // 5 m offset (diagonally out)
+
+// Test 7 (10)
+// First test of full integrated mission (launching Corgi) - 100 m out of launchpad, horizontal translated for around 80 m before running out of fuel 
+// falling threshold offset set to 0.6 from 0.4
+
+// Test 8 (11)
+// Full success! :) 5 m offset on launchpad
