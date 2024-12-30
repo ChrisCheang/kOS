@@ -17,12 +17,13 @@ SET startTime TO TIME:SECONDS.
 LOCK now TO TIME:SECONDS-startTime.
 
 SET thrott TO 1.
-set targetalt to 77. // the setpoint (bit of land off launchpad is 77, vab 186)
+set targetalt to 91. // the setpoint (bit of land off launchpad is 77, vab 186, admin 91)
 
 // Vab Roof: -0.097283135961222, -74.6190385749848
 // just off the Launchpad: -0.0993657504037605, -74.5574047734005  
-SET padlat TO -0.07.    
-SET padlng TO -74.6190385749848.
+// Administration: -0.0925, -74.66285
+SET padlat TO -0.0925.    
+SET padlng TO -74.66285.
 SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
 
 LOCK lat TO SHIP:GEOPOSITION:LAT.
@@ -53,12 +54,10 @@ until done {
 	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
 	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
 	print "longitude = " + round(lng,3).
-	print vdot(ship:sensors:acc,LATLNG(lat,lng):ALTITUDEPOSITION(ALTITUDE-100):normalized).
-	print ship:sensors:acc:mag.
 	print "mode = " + mode.
 	if mode = orbiting {
 		lock steering to -SHIP:VELOCITY:ORBIT.
-		if lng > 157 {
+		if lng > 160 {
 			set mode to deorbitBurn.
 		}
 	} else if mode = deorbitBurn {
@@ -71,23 +70,26 @@ until done {
 	} else if mode = reentry {
 		lock throttle to 0.
 		lock steering to lookdirup(LATLNG(lat,lng - 0.2):ALTITUDEPOSITION(ALTITUDE - 1000),northVec).
-		if ship:groundspeed < 2000 and altitude < 50000 {
-			rcs off.	
-			lock brakeThreshold to 8.
-			set vf to 200. // target mode 4 entry speed
-			set ag to 10. // roughly 1g glide horizontal deceleration, assumed constant
-			// 1 deg lng diff on Earth is 11.2 km (https://www.omnicalculator.com/other/latitude-longitude-distance), scaled down by 600/6382 gives 10.46 km per lng on Kerbin roughly
 
-			if lng > (padlng - brakeThreshold) {
-				brakes on. 
-			}
-			if altitude < 10000 or ABS(lng) < (ABS(padlng) + 0.25) {
+		set vf to 200. // target mode 4 entry speed
+		set ag to -14. // roughly 1g glide horizontal deceleration, assumed constant
+		set lngkm to 10.46. // 1 deg lng diff on Earth is 11.2 km (https://www.omnicalculator.com/other/latitude-longitude-distance), scaled down by 600/6382 gives 10.46 km per lng on Kerbin roughly
+		lock brakeThreshold to 0.35 + (vf^2-ship:groundspeed^2)/(2 * ag * 1000 * lngkm).
+
+		if ship:groundspeed < 2000 and altitude < 50000 {
+			rcs off.
+			if altitude < 10000 or ABS(lng) < (ABS(padlng) + 0.35) {
 				set mode to falling.
+			}
+			if lng > (padlng - (brakeThreshold)) {
+				brakes on. 
 			}
 		} else {
 			brakes off.
 			rcs on.
 		}
+		print "lng diff = " + (padlng - lng).
+		print "brakeThreshold = " + brakeThreshold.
 	} else if mode = falling {
 		rcs on.
 		brakes on.
@@ -106,6 +108,7 @@ until done {
 			set mode to hoverslam.
 		}
 	} else if mode = hoverslam {
+		rcs off.
 		set p to -2.
 		lock eastPIDUpdate to eastpid:UPDATE(TIME:SECONDS, lng).
 		lock northPIDUpdate to northpid:UPDATE(TIME:SECONDS, lat).
@@ -145,5 +148,13 @@ until done {
 // last segmented (quicksave reload from 1750 m/s) attempt with current values above landed vehicle on VAB with manual program termination (12m/s dv left) :)
 
 // Test 3 (6)
-// ship deceleration during glide is 1g - assume constant
-// ship deceleration datapoints during braking (m/s, g): (490, 1.43), (450, 1.408)
+// ship deceleration during glide ranges from 0.38 at 1784 m/s to 0.64 at 1600 m/s
+// ship deceleration datapoints during braking (m/s, g): see notebook --> hypothesis of linear decreasing is invalid due to competing effects of reducing velocity and increasing air pressure from reducing altitude, use effective average horizontal deceleration of 1.4g, around -14 m/s^2.
+
+// Test 4 (7)
+// adaptive braking worked ok ish, didn't brake as vehicle was too slow as intended 
+// final landing spot about 100 m out
+
+// Test 5 (8)
+// same issue: adaptive braking worked ok ish, didn't brake as vehicle was too slow as intended --> deorbit burn moved back 2 lng + offset target set to mode 4 entry rather than padlng
+// final landing spot about 500 m out + ran out of fuel
