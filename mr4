@@ -9,8 +9,8 @@ set hover to 6.
 
 set mode to orbiting.
 
-set initialdv to SHIP:DELTAV:CURRENT.
-LOCK dv to SHIP:DELTAV:CURRENT.
+//set initialdv to SHIP:DELTAV:CURRENT.
+//LOCK dv to SHIP:DELTAV:CURRENT.
 lock twr to ship:maxthrust / (constant:g0 * ship:mass). 
 
 SET startTime TO TIME:SECONDS.
@@ -61,10 +61,10 @@ until done {
 			set mode to deorbitBurn.
 		}
 	} else if mode = deorbitBurn {
-		print "burn dv = " + round(initialdv - dv,3).
+		// print "burn dv = " + round(initialdv - dv,3).
 		lock throttle to 1.
 		lock steering to -SHIP:VELOCITY:ORBIT.
-		if (initialdv - dv) > 100 {
+		if SHIP:VELOCITY:ORBIT:mag < 2192 {
 			set mode to reentry.
 		}
 	} else if mode = reentry {
@@ -158,3 +158,7 @@ until done {
 // Test 5 (8)
 // same issue: adaptive braking worked ok ish, didn't brake as vehicle was too slow as intended --> deorbit burn moved back 2 lng + offset target set to mode 4 entry rather than padlng
 // final landing spot about 500 m out + ran out of fuel
+
+// Test 6 (9)
+// Successful landing on administration helipad :) 35 m/s dv left with 600 after deorbit burn (700 m/s in orbit)
+// 5 m offset (diagonally out)
