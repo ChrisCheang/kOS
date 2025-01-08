@@ -1,0 +1,147 @@
+// mr2 (mecharod script 5) - attempts at refining landing script
+
+// https://ksp-kos.github.io/KOS/tutorials/pidloops.html
+// https://ksp-kos.github.io/KOS/structures/misc/pidloop.html
+// https://electronics.stackexchange.com/questions/624607/how-to-add-a-constant-to-a-control-system-block-diagram
+// https://ksp-kos.github.io/KOS/commands/flight/cooked.html#don-t-wait-or-run-slow-script-code-during-cooked-control-calculation
+
+// https://www.reddit.com/r/Kos/comments/bwy79n/clarifications_on_shipvelocitysurface/
+// https://ksp-kos.github.io/KOS/math/ref_frame.html#raw-orientation
+
+
+set falling to 1.
+set hoverslamA to 2.
+set hoverslamB to 3.
+set done to false.
+
+//set twr TO ship:maxthrust / (constant:g0 * ship:mass).
+
+set mode to falling.
+lock twr to ship:maxthrust / (constant:g0 * ship:mass). 
+// see if there's an automatic option for this?
+
+
+SET startTime TO TIME:SECONDS.
+LOCK now TO TIME:SECONDS-startTime.
+
+SET thrott TO 1.
+set targetalt to 82. // the setpoint (bit of land off launchpad is 77, vab 186)
+
+// Vab Roof: -0.097283135961222, -74.6190385749848
+// just off the Launchpad: -0.0993657504037605, -74.5574047734005  
+SET padlat TO -0.092.    
+SET padlng TO -74.56+0.0004. // 0.0004 is lng offset for tower proto 2, pitch heading both 90.
+SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+
+LOCK lat TO SHIP:GEOPOSITION:LAT.
+LOCK lng TO SHIP:GEOPOSITION:LNG.
+LOCK myspot TO LATLNG(lat,lng).
+
+LOCK northVec TO  SHIP:NORTH:FOREVECTOR.
+LOCK upVec TO SHIP:UP:VECTOR.
+LOCK eastVec TO VCRS(upVec,northVec).
+
+LOCK northSpeed TO VDOT(northVec,SHIP:VELOCITY:SURFACE).
+LOCK upSpeed TO VDOT(upVec,SHIP:VELOCITY:SURFACE).
+LOCK eastSpeed TO VDOT(eastVec,SHIP:VELOCITY:SURFACE).
+
+// PIDs should only be set once. check how to gain schedule, if not possible or finicky make two new loops.
+
+SET EASTPID TO PIDLOOP(1,0.05,6,-0.001,0.001). 
+SET NORTHPID TO PIDLOOP(1,0.05,6,-0.001,0.001).
+SET EASTPID:SETPOINT TO padlng.
+SET NORTHPID:SETPOINT TO padlat.
+
+SET corEASTPID TO PIDLOOP(1,0.05,6,-0.001,0.001). 
+SET corNORTHPID TO PIDLOOP(1,0.05,6,-0.001,0.001).
+SET corEASTPID:SETPOINT TO padlng.
+SET corNORTHPID:SETPOINT TO padlat.
+
+SET eastPIDUpdate TO 0.
+SET northPIDUpdate TO 0.
+SET targetHeading TO 0.
+
+set p to -3.
+set hAtarget TO targetalt + 100.
+
+until done {
+	if mode = falling {
+		SET falleastpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01). 
+		SET fallnorthpid TO PIDLOOP(0.5,0.05,4,-0.01,0.01).
+		SET falleastpid:SETPOINT TO padlng.
+		SET fallnorthpid:SETPOINT TO padlat.
+	
+		lock eastPIDUpdate to falleastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to fallnorthpid:UPDATE(TIME:SECONDS, lat).
+		LOCK targetVec TO LATLNG(lat - northPIDUpdate,lng - eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+80).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+
+		lock threshold to ABS((ship:verticalspeed^2)/(2*constant:g0*(twr-1))). 
+		if (altitude-hAtarget)<threshold {
+			set mode to hoverslamA.
+		}
+	} else if mode = hoverslamA {
+		lock eastPIDUpdate to eastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to northpid:UPDATE(TIME:SECONDS, lat).
+
+		LOCK targetVec TO LATLNG(lat + p*northPIDUpdate,lng + p*eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+		lock throttle to (1/twr)*((ship:verticalspeed^2)/(2*constant:g0*(altitude-(hAtarget))) + 1).
+		if ship:verticalspeed > -100 { 
+			set p to 1.
+			if ship:verticalspeed > -30 {
+				set mode to hoverslamB.
+			}
+		}
+	} else if mode = hoverslamB {
+		brakes off.
+		rcs off.
+		lock eastPIDUpdate to coreastpid:UPDATE(TIME:SECONDS, lng).
+		lock northPIDUpdate to cornorthpid:UPDATE(TIME:SECONDS, lat).
+
+		LOCK targetVec TO LATLNG(lat + northPIDUpdate,lng + eastPIDUpdate):ALTITUDEPOSITION(ALTITUDE+100).
+		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
+		lock throttle to (1/twr)*(ship:verticalspeed^2/(2*constant:g0*(altitude-(targetalt))) + 1).
+
+		if ship:verticalspeed > 0 {
+			print "Landed".
+			set done to true.
+		}
+	}
+	
+	//SET VD TO VECDRAWARGS(
+              	//{ return spot:ALTITUDEPOSITION(ALTITUDE+100). },
+              	//{ return spot:POSITION - spot:ALTITUDEPOSITION(ALTITUDE+100). },
+              	//red, "LAND HERE", 1, true).
+	//SET VDt TO VECDRAWARGS(
+              	//{ return myspot:ALTITUDEPOSITION(ALTITUDE). },
+              	//{ return 0.5*targetVec. },
+              	//blue, "targetVec", 1, true).
+
+	CLEARSCREEN.
+	//PRINT "throttle = " + round(thrott,3) + ", alt = " + round(ALTITUDE,2).
+	//PRINT "Bearing = " + round(MOD(360-ship:BEARING, 360),2) + " deg".
+	PRINT "mode = " + mode.
+	PRINT "North Velocity = " + round(northSpeed,2) + " m/s".
+	PRINT "East Velocity = " + round(eastSpeed,2) + " m/s".
+	PRINT  "Latitude dif  = " + (lat - padlat).
+	PRINT  "Longitude dif = " + (lng - padlng).
+	PRINT "eastPIDUpdate = " + eastPIDUpdate.
+	PRINT "northPIDUpdate = " + northPIDUpdate.
+	//PRINT "time = " + now.
+	PRINT threshold.
+	PRINT  "Vertical speed = " + ship:verticalspeed.
+	
+}
+
+
+// Notes: initial tests ok; hoverslam detection, minor gliding course corrections work, but interface between hoverslam and hover is not refined (some sort of adaptive hoverslam to adjust throttle based on distance could maybe work?), and gain scheduling/additional pid loops are needed for better crossrange capability during falling. 
+// with adaptive hoverslam,the landing maneuver takes 510 m/s dv tested from set position, about 300 m/s from orbit
+
+// Initial Tower Catch tests: Control surface taper is causing vehicle to slide off - consider rotating them so lower surface is flat/tapered in --> this doesn't work; solution is extreme grip pads on both fins and arms
+
+// Tower Proto 2 tests: Launchpad far too weak, explodes in less than half a second. lat offset still a big issue for actual test flights; more precision needed.
+
+// Tower Proto 3 tests: First successful Lat offset tower catch, staggered throttle target altitude control provided more slow velocity time for pos PID in the expense of slightly higher fuel consumption. Tested ok with ~620 m/s dv at 20km / 3000 units of oxidizer (~850-900 in orbit, 700 before). 5 Successful landings in a row with fins clipped further in :)
+
+// More Tower Proto 3 tests: first failure ish in about 10 catches; successful landing, but vehicle slipped out. Arms that deploy after landing to hold booster in place? (Craneheli successfully docked with slipped out booster). Important note with craneheli undocking - control must immediately be switched back to craneheli's own control unit for steering lock OR steering lock must be disabled, or else heli flips over. Launchpad still not strong enough; consider adding another vertical section + action group for undocking ground attachments all at once. Issues with undocking persist.
