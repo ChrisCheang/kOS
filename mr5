@@ -28,10 +28,12 @@ SET thrott TO 1.
 set targetalt to 82. // the setpoint (bit of land off launchpad is 77, vab 186)
 
 // Vab Roof: -0.097283135961222, -74.6190385749848
-// just off the Launchpad: -0.0993657504037605, -74.5574047734005  
+// just off the Launchpad: -0.0993657504037605, -74.5574959612902
+// Tower Catch Spot: -0.092, -74.5574959612902
+// Tower Spawn Spot: -0.092, -74.5571. Note: spawning depends on CoG / control probe not sure which, so adjust tower until catch spot lng is middle of launchpad.
+
 SET padlat TO -0.092.    
-SET padlng TO -74.56+0.0004. // 0.0004 is lng offset for tower proto 2, pitch heading both 90.
-SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
+SET padlng TO -74.5574959612902. SET spot TO LATLNG(padlat, padlng). // coordinates of a bit off the pad
 
 LOCK lat TO SHIP:GEOPOSITION:LAT.
 LOCK lng TO SHIP:GEOPOSITION:LNG.
@@ -81,6 +83,7 @@ until done {
 			set mode to hoverslamA.
 		}
 	} else if mode = hoverslamA {
+		rcs off.
 		lock eastPIDUpdate to eastpid:UPDATE(TIME:SECONDS, lng).
 		lock northPIDUpdate to northpid:UPDATE(TIME:SECONDS, lat).
 
@@ -88,7 +91,7 @@ until done {
 		LOCK STEERING TO LOOKDIRUP(targetVec,northVec).	
 		lock throttle to (1/twr)*((ship:verticalspeed^2)/(2*constant:g0*(altitude-(hAtarget))) + 1).
 		if ship:verticalspeed > -100 { 
-			set p to 1.
+			lock p to 1.
 			if ship:verticalspeed > -30 {
 				set mode to hoverslamB.
 			}
@@ -145,3 +148,9 @@ until done {
 // Tower Proto 3 tests: First successful Lat offset tower catch, staggered throttle target altitude control provided more slow velocity time for pos PID in the expense of slightly higher fuel consumption. Tested ok with ~620 m/s dv at 20km / 3000 units of oxidizer (~850-900 in orbit, 700 before). 5 Successful landings in a row with fins clipped further in :)
 
 // More Tower Proto 3 tests: first failure ish in about 10 catches; successful landing, but vehicle slipped out. Arms that deploy after landing to hold booster in place? (Craneheli successfully docked with slipped out booster). Important note with craneheli undocking - control must immediately be switched back to craneheli's own control unit for steering lock OR steering lock must be disabled, or else heli flips over. Launchpad still not strong enough; consider adding another vertical section + action group for undocking ground attachments all at once. Issues with undocking persist.
+
+// VAB glitch corrupted proto 2 and 3 files, now deleted. 
+
+// Tower Proto 4 tests: fuelling setup removed, will move to fuel trucks for refuel. Docking ports replaced with 4 claws to address docking port undock issues; During undocking, control must be moved to mecharod to maintain vehicle control at ignition. Currently launchpad is too light, vehicle lifts entire launchpad at max thrust --> make pad heavier with ore tanks. First successful non interrupted hop from launchpad to arms (center engine was left on by mistake but still worked, redone with correct two engines) after two failures (one forgot to turn on fin actuation, other likely the same issue)
+
+// Max lat offset handling capability seems to be 0.2 lat ish; defined landing spots better due to inconsistencies in launch tower spawning position. A few landings have marginal lat positioning such that one of the fins almost slips out; Horizontal 5m fuel tanks help to ensure vehicle doesn't slip out of arms completely. More tests: for some reason fuel consumption increased (now needing ~3200 units of oxidiser, aerodynamic instability during falling reducing terminal velocity saves about 100 m/s), rcs turned off for hoverslamA to help.
